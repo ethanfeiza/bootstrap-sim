@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bootstrap Sampling Simulation</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #fafaf9;
+    color: #1a1a18;
+    padding: 24px;
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  h2 {
+    font-size: 15px;
+    font-weight: 500;
+    color: #1a1a18;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #898781;
+    margin-bottom: 20px;
+  }
+  .ctrl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #52514e;
+  }
+  .ctrl label { min-width: 130px; }
+  .ctrl input[type=range] { flex: 1; accent-color: #2a78d6; }
+  .ctrl span {
+    min-width: 36px;
+    font-weight: 500;
+    color: #1a1a18;
+    font-size: 13px;
+  }
+  .stats-row {
+    display: flex;
+    gap: 10px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+  }
+  .stat-card {
+    background: #fff;
+    border: 0.5px solid #e1e0d9;
+    border-radius: 8px;
+    padding: 10px 14px;
+    flex: 1;
+    min-width: 100px;
+  }
+  .stat-card .label {
+    font-size: 11px;
+    color: #898781;
+    margin-bottom: 2px;
+  }
+  .stat-card .value {
+    font-size: 20px;
+    font-weight: 500;
+    color: #1a1a18;
+  }
+  .chart-wrap {
+    position: relative;
+    width: 100%;
+    height: 220px;
+    margin-bottom: 8px;
+  }
+  .note {
+    font-size: 12px;
+    color: #898781;
+    text-align: center;
+    min-height: 32px;
+    line-height: 1.5;
+    padding: 0 8px;
+  }
+  .legend {
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+    color: #898781;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .legend-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<h2>Bootstrap Sampling Simulation</h2>
+<p class="subtitle">Drag the sliders to see how sample size affects your confidence interval.</p>
+
+<div class="ctrl">
+  <label>Sample size (n)</label>
+  <input type="range" id="sampleN" min="5" max="80" value="12" step="1">
+  <span id="sampleNVal">12</span>
+</div>
+<div class="ctrl">
+  <label>Resamples</label>
+  <input type="range" id="nBoots" min="50" max="3000" value="500" step="50">
+  <span id="nBootsVal">500</span>
+</div>
+
+<div class="stats-row">
+  <div class="stat-card"><div class="label">Sample mean (x̄)</div><div class="value" id="statMean">—</div></div>
+  <div class="stat-card"><div class="label">95% CI lower</div><div class="value" id="statLow">—</div></div>
+  <div class="stat-card"><div class="label">95% CI upper</div><div class="value" id="statHigh">—</div></div>
+  <div class="stat-card"><div class="label">CI width</div><div class="value" id="statWidth">—</div></div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:rgba(42,120,214,0.55);"></div>95% confidence interval</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:rgba(42,120,214,0.15);"></div>Outside CI</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#e34948; width:2px; height:14px; border-radius:1px;"></div>Sample mean (x̄)</div>
+</div>
+
+<div class="chart-wrap">
+  <canvas id="bootChart" role="img" aria-label="Histogram of bootstrap resample means with 95% confidence interval shaded"></canvas>
+</div>
+<div class="note" id="noteText"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+let chart = null;
+
+function randn() {
+  let u = 0, v = 0;
+  while(u === 0) u = Math.random();
+  while(v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function drawSample(n) {
+  const arr = [];
+  for (let i = 0; i < n; i++) arr.push(Math.round(50 + randn() * 15));
+  return arr;
+}
+
+function resample(arr) {
+  const out = [];
+  for (let i = 0; i < arr.length; i++) out.push(arr[Math.floor(Math.random() * arr.length)]);
+  return out;
+}
+
+function mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+
+function buildHistogram(data, bins = 35) {
+  const mn = Math.min(...data), mx = Math.max(...data);
+  const width = (mx - mn) / bins;
+  const counts = new Array(bins).fill(0);
+  const labels = [];
+  for (let i = 0; i < bins; i++) labels.push(+(mn + i * width + width / 2).toFixed(1));
+  data.forEach(v => {
+    let idx = Math.floor((v - mn) / width);
+    if (idx >= bins) idx = bins - 1;
+    counts[idx]++;
+  });
+  return { labels, counts };
+}
+
+function runSim() {
+  const n = +document.getElementById('sampleN').value;
+  const B = +document.getElementById('nBoots').value;
+
+  const sample = drawSample(n);
+  const sampleMean = mean(sample);
+
+  const bootMeans = [];
+  for (let b = 0; b < B; b++) bootMeans.push(mean(resample(sample)));
+  bootMeans.sort((a, b) => a - b);
+
+  const lo = bootMeans[Math.floor(0.025 * B)];
+  const hi = bootMeans[Math.floor(0.975 * B)];
+  const ciWidth = hi - lo;
+
+  document.getElementById('statMean').textContent = sampleMean.toFixed(1);
+  document.getElementById('statLow').textContent = lo.toFixed(1);
+  document.getElementById('statHigh').textContent = hi.toFixed(1);
+  document.getElementById('statWidth').textContent = ciWidth.toFixed(1);
+
+  const hist = buildHistogram(bootMeans, 35);
+  const bgColors = hist.labels.map(l => (l >= lo && l <= hi) ? 'rgba(42,120,214,0.55)' : 'rgba(42,120,214,0.15)');
+
+  const meanLinePlugin = {
+    id: 'meanLine',
+    afterDraw(chart) {
+      const { ctx, scales: { x, y } } = chart;
+      const xPx = x.getPixelForValue(sampleMean);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(xPx, y.top);
+      ctx.lineTo(xPx, y.bottom);
+      ctx.strokeStyle = '#e34948';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('bootChart'), {
+    type: 'bar',
+    plugins: [meanLinePlugin],
+    data: {
+      labels: hist.labels,
+      datasets: [{
+        data: hist.counts,
+        backgroundColor: bgColors,
+        borderWidth: 0,
+        barPercentage: 1.0,
+        categoryPercentage: 1.0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 250 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => 'Mean \u2248 ' + (+items[0].label).toFixed(1),
+            label: item => 'Count: ' + item.raw
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            maxTicksLimit: 8,
+            color: '#898781',
+            font: { size: 11 },
+            callback: v => (+hist.labels[v]).toFixed(0)
+          },
+          grid: { display: false },
+          title: { display: true, text: 'Bootstrap sample mean', color: '#898781', font: { size: 12 } }
+        },
+        y: {
+          ticks: { color: '#898781', font: { size: 11 } },
+          grid: { color: '#e1e0d9' },
+          title: { display: true, text: 'Frequency', color: '#898781', font: { size: 12 } }
+        }
+      }
+    }
+  });
+
+  const noteMsg = n <= 12
+    ? `n=${n} — wide CI (${ciWidth.toFixed(1)} pts). A tight distribution around an unrepresentative sample is still wrong.`
+    : n <= 30
+    ? `n=${n} — CI is ${ciWidth.toFixed(1)} pts. Getting more stable, but still meaningful uncertainty.`
+    : `n=${n} — CI narrows to ${ciWidth.toFixed(1)} pts. More data means more trustworthy bounds.`;
+  document.getElementById('noteText').textContent = noteMsg;
+}
+
+document.getElementById('sampleN').oninput = function () {
+  document.getElementById('sampleNVal').textContent = this.value;
+  runSim();
+};
+document.getElementById('nBoots').oninput = function () {
+  document.getElementById('nBootsVal').textContent = this.value;
+  runSim();
+};
+
+window.addEventListener('load', () => {
+  if (window.Chart) runSim();
+  else setTimeout(runSim, 800);
+});
+</script>
+</body>
+</html>
